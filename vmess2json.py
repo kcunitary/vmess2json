@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from functools import partial
 import os
 import sys
 import json
@@ -9,6 +10,7 @@ import random
 import hashlib
 import binascii
 import traceback
+from typing import Any
 import urllib.request
 import urllib.parse
 
@@ -315,6 +317,7 @@ def parseLink(link):
         print("ERROR: This script supports only vmess://(N/NG) and ss:// links")
         return None
 
+
 def parseSs(sslink):
     RETOBJ = {
         "v": "2",
@@ -331,14 +334,14 @@ def parseSs(sslink):
     }
     if sslink.startswith(ssscheme):
         info = sslink[len(ssscheme):]
-        
+
         if info.rfind("#") > 0:
             info, _ps = info.split("#", 2)
             RETOBJ["ps"] = urllib.parse.unquote(_ps)
-        
+
         if info.find("@") < 0:
             # old style link
-            #paddings
+            # paddings
             blen = len(info)
             if blen % 4 > 0:
                 info += "=" * (4 - blen % 4)
@@ -386,7 +389,7 @@ def parseVmess(vmesslink):
     """
     if vmesslink.startswith(vmscheme):
         bs = vmesslink[len(vmscheme):]
-        #paddings
+        # paddings
         blen = len(bs)
         if blen % 4 > 0:
             bs += "=" * (4 - blen % 4)
@@ -396,29 +399,31 @@ def parseVmess(vmesslink):
     else:
         raise Exception("vmess link invalid")
 
+
 def load_TPL(stype):
     s = TPL[stype]
     return json.loads(s)
+
 
 def fill_basic(_c, _v):
     _outbound = _c["outbounds"][0]
     _vnext = _outbound["settings"]["vnext"][0]
 
-    _vnext["address"]               = _v["add"]
-    _vnext["port"]                  = int(_v["port"])
-    _vnext["users"][0]["id"]        = _v["id"]
-    _vnext["users"][0]["alterId"]   = int(_v["aid"])
+    _vnext["address"] = _v["add"]
+    _vnext["port"] = int(_v["port"])
+    _vnext["users"][0]["id"] = _v["id"]
+    _vnext["users"][0]["alterId"] = int(_v["aid"])
 
-    _outbound["streamSettings"]["network"]  = _v["net"]
+    _outbound["streamSettings"]["network"] = _v["net"]
 
     if _v["tls"] == "tls":
         _outbound["streamSettings"]["security"] = "tls"
         _outbound["streamSettings"]["tlsSettings"] = {"allowInsecure": True}
         if _v["host"] != "":
-            _outbound["streamSettings"]["tlsSettings"]["serverName"] = _v["host"] 
-
+            _outbound["streamSettings"]["tlsSettings"]["serverName"] = _v["host"]
 
     return _c
+
 
 def fill_shadowsocks(_c, _v):
     _ss = load_TPL("out_ss")
@@ -432,30 +437,33 @@ def fill_shadowsocks(_c, _v):
     _outbound["protocol"] = "shadowsocks"
     _outbound["settings"]["servers"] = [_ss]
 
-    del _outbound["settings"]["vnext"] 
+    del _outbound["settings"]["vnext"]
     del _outbound["streamSettings"]
     del _outbound["mux"]
 
     return _c
 
+
 def fill_tcp_http(_c, _v):
     tcps = load_TPL("http")
     tcps["header"]["type"] = _v["type"]
-    if _v["host"]  != "":
+    if _v["host"] != "":
         # multiple host
         tcps["header"]["request"]["headers"]["Host"] = _v["host"].split(",")
 
-    if _v["path"]  != "":
-        tcps["header"]["request"]["path"] = [ _v["path"] ]
+    if _v["path"] != "":
+        tcps["header"]["request"]["path"] = [_v["path"]]
 
     _c["outbounds"][0]["streamSettings"]["tcpSettings"] = tcps
     return _c
+
 
 def fill_kcp(_c, _v):
     kcps = load_TPL("kcp")
     kcps["header"]["type"] = _v["type"]
     _c["outbounds"][0]["streamSettings"]["kcpSettings"] = kcps
     return _c
+
 
 def fill_ws(_c, _v):
     wss = load_TPL("ws")
@@ -464,20 +472,23 @@ def fill_ws(_c, _v):
     _c["outbounds"][0]["streamSettings"]["wsSettings"] = wss
     return _c
 
+
 def fill_h2(_c, _v):
     h2s = load_TPL("h2")
     h2s["path"] = _v["path"]
-    h2s["host"] = [ _v["host"] ]
+    h2s["host"] = [_v["host"]]
     _c["outbounds"][0]["streamSettings"]["httpSettings"] = h2s
     return _c
+
 
 def fill_quic(_c, _v):
     quics = load_TPL("quic")
     quics["header"]["type"] = _v["type"]
-    quics["security"]       = _v["host"]
-    quics["key"]            = _v["path"]
+    quics["security"] = _v["host"]
+    quics["key"] = _v["path"]
     _c["outbounds"][0]["streamSettings"]["quicSettings"] = quics
     return _c
+
 
 def vmess2client(_t, _v):
     _net = _v["net"]
@@ -502,7 +513,8 @@ def vmess2client(_t, _v):
         return _c
     else:
         pprint.pprint(_v)
-        raise Exception("this link seem invalid to the script, please report to dev.")
+        raise Exception(
+            "this link seem invalid to the script, please report to dev.")
 
 
 def parse_multiple(lines):
@@ -510,7 +522,8 @@ def parse_multiple(lines):
         # add random in case list "ps" share common names
         curdir = os.environ.get("PWD", '/tmp/')
         rnd = "-{}".format(random.randrange(100)) if rand else ""
-        name = "{}{}.json".format(vc["ps"].replace("/", "_").replace(".", "-"), rnd)
+        name = "{}{}.json".format(vc["ps"].replace(
+            "/", "_").replace(".", "-"), rnd)
         return os.path.join(curdir, name)
 
     for line in lines:
@@ -532,11 +545,60 @@ def parse_multiple(lines):
         with open(jsonpath, 'w') as f:
             jsonDump(cc, f)
 
+def PS_Filter(filter, n):
+
+    if filter["include"]:
+        search_list = [ n["ps"].find(x)
+            for x
+            in filter["include"]
+        ]
+        bool_list = [x == -1 for x in search_list]
+
+        if all(bool_list):
+            return False
+
+    if filter["exclude"]:
+        search_list = [ n["ps"].find(x)
+            for x
+            in filter["exclude"]
+        ]
+        bool_list = [x == -1 for x in search_list]
+        
+        if not all(bool_list):
+            return False
+    return True
+
+def parse_multiple_list(lines,filter):
+    def genPath(ps, rand=False):
+        # add random in case list "ps" share common names
+        curdir = os.environ.get("PWD", '/tmp/')
+        rnd = "-{}".format(random.randrange(100)) if rand else ""
+        name = "{}{}.json".format(vc["ps"].replace(
+            "/", "_").replace(".", "-"), rnd)
+        return os.path.join(curdir, name)
+    outputs = []
+    for line in lines:
+        vc = parseLink(line.strip())
+        if vc is None:
+            continue
+
+        if int(vc["v"]) != 2:
+            print("Version mismatched, skiped. This script only supports version 2.")
+            continue
+        if not PS_Filter(filter,vc):
+            continue
+        #cc = fill_inbounds(fill_dns(vmess2client(load_TPL("CLIENT"), vc)))
+        r = vmess2client(load_TPL("CLIENT"), vc)
+        outputs.append(r)
+    return outputs
+
+
 def jsonDump(obj, fobj):
     if option.update is not None:
         oconf = json.load(option.update)
         if "outbounds" not in oconf:
-            raise KeyError("outbounds not found in {}".format(option.update.name))
+            raise KeyError(
+                "outbounds not found in {}".format(option.update.name))
 
         oconf["outbounds"][0] = obj["outbounds"][0]
         option.update.close()
@@ -546,16 +608,18 @@ def jsonDump(obj, fobj):
         return
 
     if option.outbound:
-        onlyoutbound = {"outbounds":obj["outbounds"][:1]} # keeps only the first element
+        # keeps only the first element
+        onlyoutbound = {"outbounds": obj["outbounds"][:1]}
         json.dump(onlyoutbound, fobj, indent=4)
     else:
         json.dump(obj, fobj, indent=4)
+
 
 def fill_inbounds(_c):
     _ins = option.inbounds.split(",")
     for _in in _ins:
         _proto, _port = _in.split(":", maxsplit=1)
-        _tplKey = "in_"+_proto 
+        _tplKey = "in_"+_proto
         if _tplKey in TPL:
             _inobj = load_TPL(_tplKey)
 
@@ -570,16 +634,16 @@ def fill_inbounds(_c):
                     "protocol": "dns",
                     "tag": "dns-out"
                 })
-            
+
             elif _proto == "api":
                 _c["api"] = {
                     "tag": "api",
-                    "services": [ "HandlerService", "LoggerService", "StatsService" ]
+                    "services": ["HandlerService", "LoggerService", "StatsService"]
                 }
                 _c["stats"] = {}
                 _c["policy"] = {
-                    "levels": { "0": { "statsUserUplink": True, "statsUserDownlink": True }},
-                    "system": { "statsInboundUplink": True, "statsInboundDownlink": True }
+                    "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}},
+                    "system": {"statsInboundUplink": True, "statsInboundDownlink": True}
                 }
                 _c["routing"]["rules"].insert(0, {
                     "type": "field",
@@ -592,7 +656,8 @@ def fill_inbounds(_c):
                 if len(mtinfo) == 2:
                     _port, _secret = mtinfo
                 else:
-                    _secret = hashlib.md5(str(random.random()).encode()).hexdigest()
+                    _secret = hashlib.md5(
+                        str(random.random()).encode()).hexdigest()
 
                 _inobj["settings"]["users"][0]["secret"] = _secret
                 _c["outbounds"].append(load_TPL("out_mt"))
@@ -609,6 +674,7 @@ def fill_inbounds(_c):
 
     return _c
 
+
 def fill_dns(_c):
     if option.localdns != "":
         dns = {
@@ -616,22 +682,24 @@ def fill_dns(_c):
             "port": 53,
             "domains": ["geosite:cn"]
         }
-        ## 当某个 DNS 服务器指定的域名列表匹配了当前要查询的域名，V2Ray 会优先使用这个 
-        ## DNS 服务器进行查询，否则按从上往下的顺序进行查询。
-        ## 
+        # 当某个 DNS 服务器指定的域名列表匹配了当前要查询的域名，V2Ray 会优先使用这个
+        # DNS 服务器进行查询，否则按从上往下的顺序进行查询。
+        ##
         _c["dns"]["servers"].insert(1, dns)
 
-        ## 若要使 DNS 服务生效，需要配置路由功能中的 domainStrategy。
+        # 若要使 DNS 服务生效，需要配置路由功能中的 domainStrategy。
         _c["routing"]["domainStrategy"] = "IPOnDemand"
-    
+
     return _c
+
 
 def read_subscribe(sub_url):
     print("Reading from subscribe ...")
 
     if sub_url.startswith("http"):
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.3'}
-        req =urllib.request.Request(url=sub_url,headers=headers)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.3'}
+        req = urllib.request.Request(url=sub_url, headers=headers)
         with urllib.request.urlopen(req) as response:
             _subs = response.read()
             return base64.b64decode(_subs).decode().splitlines()
@@ -645,12 +713,14 @@ def read_subscribe(sub_url):
                 lines = _subs.splitlines()
                 return lines
 
+
 def select_multiple(lines):
     vmesses = []
     for _v in lines:
         _vinfo = parseLink(_v)
         if _vinfo is not None:
-            vmesses.append({ "ps": "[{ps}] {add}:{port}/{net}".format(**_vinfo), "vm": _v })
+            vmesses.append(
+                {"ps": "[{ps}] {add}:{port}/{net}".format(**_vinfo), "vm": _v})
 
     if len(vmesses) > 1:
         print("Found {} items.".format(len(vmesses)))
@@ -670,15 +740,18 @@ def select_multiple(lines):
         sel = input("Choose >>> ")
         idx = int(sel) - 1
     else:
-        raise Exception("Current session can't open a tty to select. Specify the index to --select argument.")
+        raise Exception(
+            "Current session can't open a tty to select. Specify the index to --select argument.")
 
     item = vmesses[idx]["vm"]
-    
+
     ln = parseLink(item)
     if ln is None:
         return
     cc = fill_inbounds(fill_dns(vmess2client(load_TPL("CLIENT"), ln)))
     jsonDump(cc, option.output)
+
+
 
 def detect_stdin():
     if sys.stdin.isatty():
@@ -691,9 +764,11 @@ def detect_stdin():
     except (binascii.Error, UnicodeDecodeError):
         return stdindata.splitlines()
 
+
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="vmess2json convert vmess link to client json config.")
+    parser = argparse.ArgumentParser(
+        description="vmess2json convert vmess link to client json config.")
     parser.add_argument('--parse_all',
                         action="store_true",
                         default=False,
@@ -717,7 +792,7 @@ if __name__ == "__main__":
                         action="store",
                         default="socks:1080,http:8123",
                         help="include inbounds objects, default: \"socks:1080,http:8123\". Available proto: socks,http,dns,mt,tproxy . "
-                            "For mtproto with custom password:  mt:7788:xxxxxxxxxxxxxxx")
+                        "For mtproto with custom password:  mt:7788:xxxxxxxxxxxxxxx")
     parser.add_argument('--localdns',
                         action="store",
                         default="",
@@ -732,7 +807,7 @@ if __name__ == "__main__":
 
     option = parser.parse_args()
     stdin_data = detect_stdin()
-    
+
     if option.parse_all and stdin_data is not None:
         parse_multiple(stdin_data)
         sys.exit(0)
@@ -754,7 +829,7 @@ if __name__ == "__main__":
     if option.vmess is None and stdin_data is None:
         parser.print_help()
         sys.exit(1)
-    
+
     vmess = option.vmess if option.vmess is not None else stdin_data[0]
     vc = parseLink(vmess.strip())
     if vc is None:
